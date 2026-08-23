@@ -18,6 +18,7 @@ def test_run_enrichment_passes_headless_to_detail_scraper(monkeypatch) -> None:
 
     monkeypatch.setattr(detail, "init_db", lambda: _Conn())
     monkeypatch.setattr(detail, "apply_rule_gate", lambda conn: {"scanned": 0, "filtered": 0, "cleared": 0})
+    monkeypatch.setattr(detail, "run_prefilter", lambda conn: {"enabled": False})
     monkeypatch.setattr(detail, "resolve_all_urls", lambda conn: {"resolved": 0, "already_absolute": 0, "failed": 0})
     monkeypatch.setattr(
         detail,

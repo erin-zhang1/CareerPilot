@@ -113,6 +113,10 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             strategy              TEXT,
             discovered_at         TEXT,
             filter_reason         TEXT,
+            prefilter_decision    TEXT,
+            prefilter_reason      TEXT,
+            prefiltered_at        TEXT,
+            prefilter_signature   TEXT,
 
             -- Enrichment stage (detail_scraper)
             full_description      TEXT,
@@ -170,6 +174,10 @@ _ALL_COLUMNS: dict[str, str] = {
     "strategy": "TEXT",
     "discovered_at": "TEXT",
     "filter_reason": "TEXT",
+    "prefilter_decision": "TEXT",
+    "prefilter_reason": "TEXT",
+    "prefiltered_at": "TEXT",
+    "prefilter_signature": "TEXT",
     # Enrichment
     "full_description": "TEXT",
     "application_url": "TEXT",
@@ -261,6 +269,12 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     stats["total"] = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
     stats["filtered"] = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE filter_reason IS NOT NULL"
+    ).fetchone()[0]
+    stats["hard_filtered"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE filter_reason LIKE 'rule:%'"
+    ).fetchone()[0]
+    stats["prefilter_rejected"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE filter_reason LIKE 'sweep:%'"
     ).fetchone()[0]
 
     # By site breakdown

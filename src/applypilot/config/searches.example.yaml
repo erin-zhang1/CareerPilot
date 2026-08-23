@@ -94,6 +94,10 @@ defaults:
   hours_old: 72          # Only jobs posted within this many hours
   seniority_floor_years: 3  # Reject junior/new-grad titles when candidate YOE >= this value
   max_required_years: 0     # Reject explicit hard minimums above this; 0 disables
+  llm_sweep_enabled: false  # Optional cheap semantic prefilter before enrichment
+  llm_sweep_model: "gemini/gemini-3.7-flash"
+  llm_sweep_batch_size: 12
+  llm_sweep_reject_confidence: 0.90
   blocked_countries:      # Hard reject even when a posting says remote
     - "India"
     - "Philippines"

@@ -34,6 +34,13 @@ def _apply_hard_filters() -> dict[str, int]:
     return apply_rule_gate(init_db())
 
 
+def _apply_cheap_prefilter() -> dict:
+    """Run the optional Gemini sweep against hard-filter survivors."""
+    from applypilot.scoring.prefilter import run_prefilter
+
+    return run_prefilter(init_db())
+
+
 # ---------------------------------------------------------------------------
 # Stage definitions
 # ---------------------------------------------------------------------------
@@ -113,6 +120,7 @@ def _run_discover(workers: int = 1, site_filter: list[str] | None = None) -> dic
             stats["smartextract"] = f"error: {e}"
             stats["greenhouse"] = "skipped (site-filter)"
         stats["hard_filter"] = _apply_hard_filters()
+        stats["cheap_prefilter"] = _apply_cheap_prefilter()
         return stats
 
     # JobSpy
@@ -160,6 +168,7 @@ def _run_discover(workers: int = 1, site_filter: list[str] | None = None) -> dic
         stats["greenhouse"] = f"error: {e}"
 
     stats["hard_filter"] = _apply_hard_filters()
+    stats["cheap_prefilter"] = _apply_cheap_prefilter()
     return stats
 
 
@@ -167,6 +176,7 @@ def _run_enrich(workers: int = 1, headless: bool = True) -> dict:
     """Stage: Detail enrichment — scrape full descriptions and apply URLs."""
     try:
         _apply_hard_filters()
+        _apply_cheap_prefilter()
         from applypilot.enrichment.detail import run_enrichment
         run_enrichment(workers=workers, headless=headless)
         return {"status": "ok"}
@@ -319,6 +329,7 @@ def _count_pending(stage: str, min_score: int = 7) -> int:
         return 0
     if stage in ("enrich", "score"):
         _apply_hard_filters()
+        _apply_cheap_prefilter()
     conn = get_connection()
     if "?" in sql:
         return conn.execute(sql, (min_score,)).fetchone()[0]

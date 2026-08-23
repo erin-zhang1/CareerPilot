@@ -93,11 +93,14 @@ def _infer_provider_and_source(env: Mapping[str, str]) -> tuple[str, str] | None
     return None
 
 
-def resolve_llm_config(env: Mapping[str, str] | None = None) -> LLMConfig:
+def resolve_llm_config(
+    env: Mapping[str, str] | None = None,
+    model_override: str | None = None,
+) -> LLMConfig:
     """Resolve LLM configuration from environment."""
     env_map = env if env is not None else os.environ
 
-    model = _env_get(env_map, "LLM_MODEL")
+    model = (model_override or "").strip() or _env_get(env_map, "LLM_MODEL")
     local_url = _env_get(env_map, "LLM_URL")
     inferred = _infer_provider_and_source(env_map)
     if model:
@@ -273,12 +276,28 @@ class LLMClient:
 
 
 _instance: LLMClient | None = None
+_model_instances: dict[str, LLMClient] = {}
 _lock = threading.Lock()
 
 
-def get_client() -> LLMClient:
-    """Return (or create) the module-level LLMClient singleton."""
+def get_client(model: str | None = None) -> LLMClient:
+    """Return a cached client, optionally routed to a stage-specific model."""
     global _instance
+    requested_model = (model or "").strip()
+    if requested_model:
+        with _lock:
+            if requested_model not in _model_instances:
+                try:
+                    from applypilot.config import load_env
+
+                    load_env()
+                except ModuleNotFoundError:
+                    log.debug("python-dotenv not installed; skipping .env auto-load in llm.get_client().")
+                resolved = resolve_llm_config(model_override=requested_model)
+                log.info("LLM provider: %s  model: %s", resolved.provider, resolved.model)
+                _model_instances[requested_model] = LLMClient(resolved)
+            return _model_instances[requested_model]
+
     if _instance is None:
         with _lock:
             if _instance is None:
@@ -288,7 +307,7 @@ def get_client() -> LLMClient:
                     load_env()
                 except ModuleNotFoundError:
                     log.debug("python-dotenv not installed; skipping .env auto-load in llm.get_client().")
-                config = resolve_llm_config()
-                log.info("LLM provider: %s  model: %s", config.provider, config.model)
-                _instance = LLMClient(config)
+                resolved = resolve_llm_config()
+                log.info("LLM provider: %s  model: %s", resolved.provider, resolved.model)
+                _instance = LLMClient(resolved)
     return _instance

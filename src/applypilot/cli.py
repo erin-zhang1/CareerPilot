@@ -513,7 +513,8 @@ def status() -> None:
     summary.add_column("Count", justify="right")
 
     summary.add_row("Total jobs discovered", str(stats["total"]))
-    summary.add_row("Filtered by hard rules", str(stats.get("filtered", 0)))
+    summary.add_row("Filtered by hard rules", str(stats.get("hard_filtered", 0)))
+    summary.add_row("Rejected by Gemini sweep", str(stats.get("prefilter_rejected", 0)))
     summary.add_row("With full description", str(stats["with_description"]))
     summary.add_row("Pending enrichment", str(stats["pending_detail"]))
     summary.add_row("Enrichment errors", str(stats["detail_errors"]))

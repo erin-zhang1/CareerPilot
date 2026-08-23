@@ -144,6 +144,7 @@ Job search queries, target titles, locations, boards, and deterministic filters.
 - `defaults.blocked_countries`: hard country rejects, including remote postings tied to those countries.
 - `defaults.seniority_floor_years`: reject junior/new-grad titles once profile experience meets the configured floor.
 - `defaults.max_required_years`: reject descriptions with a higher explicit hard minimum such as `4+ years` or `at least 4 years`; zero disables it.
+- `defaults.llm_sweep_enabled`: enable a fail-open Gemini batch prefilter before enrichment. Configure its model, batch size, and reject-confidence threshold with the adjacent `llm_sweep_*` keys.
 
 Rejected rows remain in SQLite with `filter_reason` for auditing, but do not proceed to enrichment, scoring, tailoring, or application.
 
@@ -165,6 +166,8 @@ For auto-apply, you can also set `CHROME_PROFILE_DIRECTORY` (for example `Profil
 Queries Indeed, LinkedIn, Glassdoor, ZipRecruiter, Google Jobs via JobSpy. Fetches from 129 Greenhouse ATS employers. Scrapes 48 Workday employer portals (configurable in `employers.yaml`). Hits 31 direct career sites with custom extractors, including Lensa with pagination-aware extraction and extra relevance filtering. Deduplicates by URL.
 
 After discovery, a deterministic rule gate applies the configured title, seniority, country, and location filters before any downstream LLM work. Enrichment and scoring run the same gate again so configuration changes and newly completed rows are handled consistently.
+
+When the optional cheap sweep is enabled, Gemini reviews compact batches after the hard gate. It rejects only high-confidence semantic mismatches; uncertain, malformed, or failed responses pass through. Codex remains the expensive browser-agent backend used at the application stage.
 
 For targeted debugging or source-specific refreshes, you can limit discovery to selected `sites.yaml` entries:
 

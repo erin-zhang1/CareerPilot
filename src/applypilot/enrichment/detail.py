@@ -25,6 +25,7 @@ from playwright.sync_api import sync_playwright
 from applypilot.database import init_db
 from applypilot.filters import apply_rule_gate
 from applypilot.llm import get_client
+from applypilot.scoring.prefilter import run_prefilter
 
 log = logging.getLogger(__name__)
 
@@ -817,6 +818,7 @@ def stream_detail(
     try:
         while True:
             apply_rule_gate(conn)
+            run_prefilter(conn)
             placeholders = ",".join("?" * len(SKIP_DETAIL_SITES))
             rows = conn.execute(
                 f"SELECT url, title, site FROM jobs WHERE detail_scraped_at IS NULL "
@@ -875,6 +877,7 @@ def run_enrichment(limit: int = 100, workers: int = 1, headless: bool = True) ->
     """
     conn = init_db()
     apply_rule_gate(conn)
+    run_prefilter(conn)
 
     # URL resolution first
     url_stats = resolve_all_urls(conn)
