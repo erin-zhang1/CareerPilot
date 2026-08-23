@@ -10,7 +10,9 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from applypilot import config
 from applypilot.config import DB_PATH, DEFAULTS
+from applypilot.filters import filter_job
 
 # Thread-local connection storage — each thread gets its own connection
 # (required for SQLite thread safety with parallel workers)
@@ -77,7 +79,8 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     so it won't destroy existing data.
 
     Schema columns by stage:
-      - Discovery:  url, title, salary, description, location, site, strategy, discovered_at
+      - Discovery:  url, title, salary, description, location, site, strategy,
+                    discovered_at, filter_reason
       - Enrichment: full_description, application_url, detail_scraped_at, detail_error
       - Scoring:    fit_score, score_reasoning, scored_at
       - Tailoring:  tailored_resume_path, tailored_at, tailor_attempts
@@ -109,6 +112,7 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             site                  TEXT,
             strategy              TEXT,
             discovered_at         TEXT,
+            filter_reason         TEXT,
 
             -- Enrichment stage (detail_scraper)
             full_description      TEXT,
@@ -165,6 +169,7 @@ _ALL_COLUMNS: dict[str, str] = {
     "site": "TEXT",
     "strategy": "TEXT",
     "discovered_at": "TEXT",
+    "filter_reason": "TEXT",
     # Enrichment
     "full_description": "TEXT",
     "application_url": "TEXT",
@@ -254,6 +259,9 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
 
     # Total jobs
     stats["total"] = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    stats["filtered"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE filter_reason IS NOT NULL"
+    ).fetchone()[0]
 
     # By site breakdown
     rows = conn.execute(
@@ -263,60 +271,62 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
 
     # Enrichment stage
     stats["pending_detail"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL"
+        "SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL AND filter_reason IS NULL"
     ).fetchone()[0]
 
     stats["with_description"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND filter_reason IS NULL"
     ).fetchone()[0]
 
     stats["detail_errors"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE detail_error IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE detail_error IS NOT NULL AND filter_reason IS NULL"
     ).fetchone()[0]
 
     # Scoring stage
     stats["scored"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL AND filter_reason IS NULL"
     ).fetchone()[0]
 
     stats["unscored"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
-        "WHERE full_description IS NOT NULL AND fit_score IS NULL"
+        "WHERE full_description IS NOT NULL AND fit_score IS NULL AND filter_reason IS NULL"
     ).fetchone()[0]
 
     # Score distribution
     dist_rows = conn.execute(
         "SELECT fit_score, COUNT(*) as cnt FROM jobs "
-        "WHERE fit_score IS NOT NULL "
+        "WHERE fit_score IS NOT NULL AND filter_reason IS NULL "
         "GROUP BY fit_score ORDER BY fit_score DESC"
     ).fetchall()
     stats["score_distribution"] = [(row[0], row[1]) for row in dist_rows]
 
     # Tailoring stage
     stats["tailored"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL AND filter_reason IS NULL"
     ).fetchone()[0]
 
     stats["untailored_eligible"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
-        "WHERE fit_score >= 7 AND full_description IS NOT NULL "
+        "WHERE fit_score >= 7 AND full_description IS NOT NULL AND filter_reason IS NULL "
         "AND tailored_resume_path IS NULL"
     ).fetchone()[0]
 
     stats["tailor_exhausted"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
         "WHERE COALESCE(tailor_attempts, 0) >= 5 "
+        "AND filter_reason IS NULL "
         "AND tailored_resume_path IS NULL"
     ).fetchone()[0]
 
     # Cover letter stage
     stats["with_cover_letter"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE cover_letter_path IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE cover_letter_path IS NOT NULL AND filter_reason IS NULL"
     ).fetchone()[0]
 
     stats["cover_exhausted"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
         "WHERE COALESCE(cover_attempts, 0) >= 5 "
+        "AND filter_reason IS NULL "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '')"
     ).fetchone()[0]
 
@@ -333,6 +343,7 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
         "SELECT COUNT(*) FROM jobs "
         "WHERE tailored_resume_path IS NOT NULL "
         "AND applied_at IS NULL "
+        "AND filter_reason IS NULL "
         "AND application_url IS NOT NULL "
         "AND (apply_status IS NULL OR apply_status = 'failed') "
         "AND COALESCE(apply_attempts, 0) < ? "
@@ -359,17 +370,23 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
+    search_cfg = config.load_search_config()
+    try:
+        profile = config.load_profile()
+    except (FileNotFoundError, OSError, ValueError):
+        profile = {}
 
     for i, job in enumerate(jobs):
         url = job.get("url")
         if not url:
             continue
+        reason = filter_job(job, search_cfg, profile)
         try:
             conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at, "
+                "filter_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (url, job.get("title"), job.get("salary"), job.get("description"),
-                 job.get("location"), site, strategy, now),
+                 job.get("location"), site, strategy, now, reason),
             )
             new += 1
         except sqlite3.IntegrityError:
@@ -403,17 +420,18 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
 
     conditions = {
         "discovered": "1=1",
-        "pending_detail": "detail_scraped_at IS NULL",
+        "pending_detail": "detail_scraped_at IS NULL AND filter_reason IS NULL",
         "enriched": "full_description IS NOT NULL",
-        "pending_score": "full_description IS NOT NULL AND fit_score IS NULL",
+        "pending_score": "full_description IS NOT NULL AND fit_score IS NULL AND filter_reason IS NULL",
         "scored": "fit_score IS NOT NULL",
         "pending_tailor": (
-            "fit_score >= ? AND full_description IS NOT NULL "
+            "fit_score >= ? AND full_description IS NOT NULL AND filter_reason IS NULL "
             "AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts, 0) < 5"
         ),
         "tailored": "tailored_resume_path IS NOT NULL",
         "pending_apply": (
             "tailored_resume_path IS NOT NULL AND applied_at IS NULL "
+            "AND filter_reason IS NULL "
             "AND application_url IS NOT NULL "
             "AND (apply_status IS NULL OR apply_status = 'failed') "
             "AND COALESCE(apply_attempts, 0) < ? "

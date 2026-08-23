@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
 from applypilot.database import init_db
+from applypilot.filters import apply_rule_gate
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
@@ -704,7 +705,8 @@ def _run_detail_scraper(
     """
     placeholders = ",".join("?" * len(SKIP_DETAIL_SITES))
     rows = conn.execute(
-        f"SELECT url, title, site FROM jobs WHERE detail_scraped_at IS NULL AND site NOT IN ({placeholders}) ORDER BY site",
+        f"SELECT url, title, site FROM jobs WHERE detail_scraped_at IS NULL "
+        f"AND filter_reason IS NULL AND site NOT IN ({placeholders}) ORDER BY site",
         list(SKIP_DETAIL_SITES),
     ).fetchall()
 
@@ -814,9 +816,11 @@ def stream_detail(
 
     try:
         while True:
+            apply_rule_gate(conn)
             placeholders = ",".join("?" * len(SKIP_DETAIL_SITES))
             rows = conn.execute(
-                f"SELECT url, title, site FROM jobs WHERE detail_scraped_at IS NULL AND site NOT IN ({placeholders}) ORDER BY site LIMIT 200",
+                f"SELECT url, title, site FROM jobs WHERE detail_scraped_at IS NULL "
+                f"AND filter_reason IS NULL AND site NOT IN ({placeholders}) ORDER BY site LIMIT 200",
                 list(SKIP_DETAIL_SITES),
             ).fetchall()
 
@@ -870,6 +874,7 @@ def run_enrichment(limit: int = 100, workers: int = 1, headless: bool = True) ->
         Dict with stats: processed, ok, partial, error, tiers.
     """
     conn = init_db()
+    apply_rule_gate(conn)
 
     # URL resolution first
     url_stats = resolve_all_urls(conn)

@@ -355,7 +355,8 @@ class TestStoreJobs:
                 full_description TEXT,
                 application_url TEXT,
                 detail_scraped_at TEXT,
-                detail_error TEXT
+                detail_error TEXT,
+                filter_reason TEXT
             )
         """)
 
@@ -401,7 +402,8 @@ class TestStoreJobs:
                 full_description TEXT,
                 application_url TEXT,
                 detail_scraped_at TEXT,
-                detail_error TEXT
+                detail_error TEXT,
+                filter_reason TEXT
             )
         """)
 
@@ -444,7 +446,8 @@ class TestStoreJobs:
                 full_description TEXT,
                 application_url TEXT,
                 detail_scraped_at TEXT,
-                detail_error TEXT
+                detail_error TEXT,
+                filter_reason TEXT
             )
         """)
 
@@ -516,7 +519,8 @@ class TestIntegration:
                 full_description TEXT,
                 application_url TEXT,
                 detail_scraped_at TEXT,
-                detail_error TEXT
+                detail_error TEXT,
+                filter_reason TEXT
             )
         """)
         mock_get_conn.return_value = conn

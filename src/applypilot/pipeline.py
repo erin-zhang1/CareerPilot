@@ -21,11 +21,17 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from applypilot.config import load_env, ensure_dirs
-from applypilot.database import init_db, get_connection, get_stats
+from applypilot.config import ensure_dirs, load_env
+from applypilot.database import get_connection, get_stats, init_db
+from applypilot.filters import apply_rule_gate
 
 log = logging.getLogger(__name__)
 console = Console()
+
+
+def _apply_hard_filters() -> dict[str, int]:
+    """Run the shared deterministic gate against the current database."""
+    return apply_rule_gate(init_db())
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +112,7 @@ def _run_discover(workers: int = 1, site_filter: list[str] | None = None) -> dic
             stats["workday"] = "skipped (site-filter)"
             stats["smartextract"] = f"error: {e}"
             stats["greenhouse"] = "skipped (site-filter)"
+        stats["hard_filter"] = _apply_hard_filters()
         return stats
 
     # JobSpy
@@ -152,12 +159,14 @@ def _run_discover(workers: int = 1, site_filter: list[str] | None = None) -> dic
         console.print(f"  [red]Greenhouse error:[/red] {e}")
         stats["greenhouse"] = f"error: {e}"
 
+    stats["hard_filter"] = _apply_hard_filters()
     return stats
 
 
 def _run_enrich(workers: int = 1, headless: bool = True) -> dict:
     """Stage: Detail enrichment — scrape full descriptions and apply URLs."""
     try:
+        _apply_hard_filters()
         from applypilot.enrichment.detail import run_enrichment
         run_enrichment(workers=workers, headless=headless)
         return {"status": "ok"}
@@ -169,6 +178,7 @@ def _run_enrich(workers: int = 1, headless: bool = True) -> dict:
 def _run_score() -> dict:
     """Stage: LLM scoring — assign fit scores 1-10."""
     try:
+        _apply_hard_filters()
         from applypilot.scoring.scorer import run_scoring
         run_scoring()
         return {"status": "ok"}
@@ -277,16 +287,18 @@ class _StageTracker:
 
 # SQL to count pending work for each stage
 _PENDING_SQL: dict[str, str] = {
-    "enrich": "SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL",
-    "score":  "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL",
+    "enrich": "SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL AND filter_reason IS NULL",
+    "score":  "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL AND filter_reason IS NULL",
     "tailor": (
         "SELECT COUNT(*) FROM jobs WHERE fit_score >= ? "
         "AND full_description IS NOT NULL "
+        "AND filter_reason IS NULL "
         "AND tailored_resume_path IS NULL "
         "AND COALESCE(tailor_attempts, 0) < 5"
     ),
     "cover": (
         "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL "
+        "AND filter_reason IS NULL "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
         "AND COALESCE(cover_attempts, 0) < 5"
     ),
@@ -305,6 +317,8 @@ def _count_pending(stage: str, min_score: int = 7) -> int:
     sql = _PENDING_SQL.get(stage)
     if sql is None:
         return 0
+    if stage in ("enrich", "score"):
+        _apply_hard_filters()
     conn = get_connection()
     if "?" in sql:
         return conn.execute(sql, (min_score,)).fetchone()[0]

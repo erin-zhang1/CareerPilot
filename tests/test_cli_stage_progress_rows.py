@@ -6,6 +6,7 @@ from applypilot.cli import _build_stage_progress_rows
 def test_build_stage_progress_rows_shapes_counts() -> None:
     stats = {
         "total": 12,
+        "filtered": 2,
         "pending_detail": 5,
         "scored": 4,
         "unscored": 3,
@@ -19,7 +20,7 @@ def test_build_stage_progress_rows_shapes_counts() -> None:
     rows = _build_stage_progress_rows(stats)
 
     assert rows == [
-        ("Enrichment", 12, 5, 7),
+        ("Enrichment", 10, 5, 5),
         ("Scoring", 7, 3, 4),
         ("Tailoring (7+)", 5, 2, 3),
         ("Cover Letters", 3, 1, 2),

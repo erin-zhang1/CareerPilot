@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from applypilot.config import RESUME_PATH
 from applypilot.database import get_connection, get_jobs_by_stage
+from applypilot.filters import apply_rule_gate
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
@@ -112,9 +113,10 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     """
     resume_text = RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
+    apply_rule_gate(conn)
 
     if rescore:
-        query = "SELECT * FROM jobs WHERE full_description IS NOT NULL"
+        query = "SELECT * FROM jobs WHERE full_description IS NOT NULL AND filter_reason IS NULL"
         if limit > 0:
             query += f" LIMIT {limit}"
         jobs = conn.execute(query).fetchall()

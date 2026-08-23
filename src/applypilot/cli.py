@@ -120,7 +120,7 @@ def _version_callback(value: bool) -> None:
 def _build_stage_progress_rows(stats: dict) -> list[tuple[str, int, int, int]]:
     """Build stage-oriented (total, pending, completed) rows for status output."""
     enrich_pending = stats["pending_detail"]
-    enrich_total = stats["total"]
+    enrich_total = max(stats["total"] - stats.get("filtered", 0), 0)
     enrich_completed = max(enrich_total - enrich_pending, 0)
 
     score_pending = stats["unscored"]
@@ -513,6 +513,7 @@ def status() -> None:
     summary.add_column("Count", justify="right")
 
     summary.add_row("Total jobs discovered", str(stats["total"]))
+    summary.add_row("Filtered by hard rules", str(stats.get("filtered", 0)))
     summary.add_row("With full description", str(stats["with_description"]))
     summary.add_row("Pending enrichment", str(stats["pending_detail"]))
     summary.add_row("Enrichment errors", str(stats["detail_errors"]))

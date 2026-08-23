@@ -31,6 +31,7 @@ from playwright.sync_api import sync_playwright
 from applypilot import config
 from applypilot.config import CONFIG_DIR
 from applypilot.database import init_db, get_stats
+from applypilot.filters import filter_job, load_filter_settings, location_filter_reason
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
@@ -54,25 +55,13 @@ def _load_location_filter(search_cfg: dict | None = None):
     """Load location accept/reject lists from search config."""
     if search_cfg is None:
         search_cfg = config.load_search_config()
-    accept = search_cfg.get("location_accept", [])
-    reject = search_cfg.get("location_reject_non_remote", [])
-    return accept, reject
+    settings = load_filter_settings(search_cfg)
+    return list(settings.location_accept), list(settings.location_reject_non_remote)
 
 
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
     """Check if a job location passes the user's location filter."""
-    if not location:
-        return True
-    loc = location.lower()
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-    for r in reject:
-        if r.lower() in loc:
-            return False
-    for a in accept:
-        if a.lower() in loc:
-            return True
-    return False
+    return location_filter_reason(location, accept, reject) is None
 
 
 # -- Site configuration from YAML --------------------------------------------
@@ -100,27 +89,35 @@ def _store_jobs_filtered(
     new = 0
     existing = 0
     filtered = 0
+    search_cfg = config.load_search_config()
+    try:
+        profile = config.load_profile()
+    except (FileNotFoundError, OSError, ValueError):
+        profile = {}
 
     for job in jobs:
         url = job.get("url")
         if not url:
             continue
-        if not _location_ok(job.get("location"), accept_locs, reject_locs):
+        location_reason = location_filter_reason(job.get("location"), accept_locs, reject_locs)
+        if location_reason:
             filtered += 1
-            continue
+        filter_reason = filter_job(job, search_cfg, profile)
+        if filter_reason is None and location_reason:
+            filter_reason = f"rule:{location_reason}"
         try:
             conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at, "
+                "filter_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (url, job.get("title"), job.get("salary"), job.get("description"),
-                 job.get("location"), site, strategy, now),
+                 job.get("location"), site, strategy, now, filter_reason),
             )
             new += 1
         except sqlite3.IntegrityError:
             existing += 1
 
     if filtered:
-        log.info("Filtered %d jobs (wrong location)", filtered)
+        log.info("Marked %d jobs as filtered (wrong location)", filtered)
     conn.commit()
     return new, existing
 

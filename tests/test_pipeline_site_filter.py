@@ -24,6 +24,7 @@ def test_run_discover_with_site_filter_only_runs_matching_smart_extract(monkeypa
 
     monkeypatch.setattr("applypilot.discovery.smartextract.load_sites", _fake_load_sites)
     monkeypatch.setattr("applypilot.discovery.smartextract.run_smart_extract", _fake_run_smart_extract)
+    monkeypatch.setattr(pipeline, "_apply_hard_filters", lambda: {"scanned": 0, "filtered": 0, "cleared": 0})
 
     result = pipeline._run_discover(workers=2, site_filter=["Lensa"])
 
@@ -33,3 +34,4 @@ def test_run_discover_with_site_filter_only_runs_matching_smart_extract(monkeypa
     assert result["workday"] == "skipped (site-filter)"
     assert result["smartextract"] == "ok"
     assert result["greenhouse"] == "skipped (site-filter)"
+    assert result["hard_filter"]["filtered"] == 0

@@ -61,26 +61,21 @@ locations:
   - location: "Remote"
     remote: true
 
-# Location filtering -- accept/reject patterns for job location text
-location:
-  accept_patterns:
-    - "San Francisco"
-    - "Bay Area"
-    - "SF"
-    - "California"
-    - "CA"
-    - "Remote"
-    - "Anywhere"
-    - "United States"
-    - "US"
-    - "USA"
-  reject_patterns:
-    - "New York only"
-    - "Seattle only"
-    - "onsite only"
-    - "London, UK"
-    - "India"
-    - "Philippines"
+# Location filtering -- remote jobs always pass these ordinary geo rules.
+location_accept:
+  - "San Francisco"
+  - "Bay Area"
+  - "SF"
+  - "California"
+  - "CA"
+  - "United States"
+  - "US"
+  - "USA"
+location_reject_non_remote:
+  - "New York only"
+  - "Seattle only"
+  - "onsite only"
+  - "London, UK"
 
 # Country for Indeed/LinkedIn/Google Jobs searches
 country: "USA"
@@ -97,6 +92,11 @@ boards:
 defaults:
   results_per_site: 100  # Max results per board per query
   hours_old: 72          # Only jobs posted within this many hours
+  seniority_floor_years: 3  # Reject junior/new-grad titles when candidate YOE >= this value
+  max_required_years: 0     # Reject explicit hard minimums above this; 0 disables
+  blocked_countries:      # Hard reject even when a posting says remote
+    - "India"
+    - "Philippines"
 
 # Negative keywords -- skip jobs with these in the title (case-insensitive)
 exclude_titles:
@@ -110,3 +110,6 @@ exclude_titles:
   - "clearance required"
   - "TS/SCI"
   - "principal scientist"
+
+# Optional title allow-list. Empty means any title not excluded above may pass.
+title_require_any: []

@@ -22,6 +22,7 @@ import yaml
 from applypilot import config
 from applypilot.config import CONFIG_DIR
 from applypilot.database import get_connection, init_db
+from applypilot.filters import filter_job, load_filter_settings, location_filter_reason
 
 log = logging.getLogger(__name__)
 
@@ -45,30 +46,13 @@ def _load_location_filter(search_cfg: dict | None = None):
     if search_cfg is None:
         search_cfg = config.load_search_config()
 
-    accept = search_cfg.get("location_accept", [])
-    reject = search_cfg.get("location_reject_non_remote", [])
-    return accept, reject
+    settings = load_filter_settings(search_cfg)
+    return list(settings.location_accept), list(settings.location_reject_non_remote)
 
 
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
     """Check if a job location passes the user's location filter."""
-    if not location:
-        return True
-
-    loc = location.lower()
-
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-
-    for r in reject:
-        if r.lower() in loc:
-            return False
-
-    for a in accept:
-        if a.lower() in loc:
-            return True
-
-    return False
+    return location_filter_reason(location, accept, reject) is None
 
 
 # -- HTML stripper -----------------------------------------------------------
@@ -305,6 +289,11 @@ def store_results(conn: sqlite3.Connection, jobs: list[dict], employers: dict) -
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
+    search_cfg = config.load_search_config()
+    try:
+        profile = config.load_profile()
+    except (FileNotFoundError, OSError, ValueError):
+        profile = {}
 
     for job in jobs:
         url = job.get("apply_url", "")
@@ -323,14 +312,15 @@ def store_results(conn: sqlite3.Connection, jobs: list[dict], employers: dict) -
 
         site = job.get("employer_name", "Corporate")
         strategy = "workday_api"
+        filter_reason = job.get("_filter_reason") or filter_job(job, search_cfg, profile)
 
         try:
             conn.execute(
                 "INSERT INTO jobs (url, title, salary, description, location, site, strategy, "
-                "discovered_at, full_description, application_url, detail_scraped_at, detail_error) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "discovered_at, full_description, application_url, detail_scraped_at, detail_error, filter_reason) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (url, job.get("title"), None, short_desc, job.get("location"),
-                 site, strategy, now, full_description, url, detail_scraped_at, detail_error),
+                 site, strategy, now, full_description, url, detail_scraped_at, detail_error, filter_reason),
             )
             new += 1
         except sqlite3.IntegrityError:
@@ -354,7 +344,8 @@ def _process_one(
     try:
         jobs = search_employer(
             employer_key, emp, search_text,
-            location_filter=location_filter,
+            # Retain rejects so they can be stored with filter_reason.
+            location_filter=False,
             accept_locs=accept_locs,
             reject_locs=reject_locs,
         )
@@ -367,13 +358,30 @@ def _process_one(
         return {"employer": emp["name"], "query": search_text,
                 "found": 0, "new": 0, "existing": 0}
 
+    search_cfg = config.load_search_config()
     try:
-        jobs = fetch_details(emp, jobs)
+        profile = config.load_profile()
+    except (FileNotFoundError, OSError, ValueError):
+        profile = {}
+
+    eligible: list[dict] = []
+    rejected: list[dict] = []
+    for job in jobs:
+        reason = filter_job(job, search_cfg, profile)
+        if reason is None and location_filter:
+            geo_reason = location_filter_reason(job.get("location"), accept_locs, reject_locs)
+            reason = f"rule:{geo_reason}" if geo_reason else None
+        if reason:
+            job["_filter_reason"] = reason
+        (rejected if reason else eligible).append(job)
+
+    try:
+        eligible = fetch_details(emp, eligible)
     except Exception as e:
         log.error("%s: ERROR fetching details for '%s': %s", emp["name"], search_text, e)
 
     conn = get_connection()
-    new, existing = store_results(conn, jobs, employers)
+    new, existing = store_results(conn, eligible + rejected, employers)
     log.info("%s: %d new, %d already in DB", emp["name"], new, existing)
 
     return {"employer": emp["name"], "query": search_text,

@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from applypilot import config
+from applypilot.filters import load_filter_settings
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ def _build_location_check(profile: dict, search_config: dict) -> str:
     """
     personal = profile["personal"]
     location_cfg = search_config.get("location", {})
-    accept_patterns = location_cfg.get("accept_patterns", [])
+    accept_patterns = list(load_filter_settings(search_config).location_accept)
     primary_city = personal.get("city", location_cfg.get("primary", "your city"))
 
     # Build the list of acceptable cities for hybrid/onsite

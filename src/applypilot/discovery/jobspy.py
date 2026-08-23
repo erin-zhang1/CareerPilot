@@ -16,6 +16,7 @@ from jobspy import scrape_jobs
 
 from applypilot import config
 from applypilot.database import get_connection, init_db
+from applypilot.filters import filter_job, load_filter_settings, location_filter_reason
 
 log = logging.getLogger(__name__)
 
@@ -81,9 +82,8 @@ def _load_location_config(search_cfg: dict) -> tuple[list[str], list[str]]:
 
     Falls back to sensible defaults if not defined in the YAML.
     """
-    accept = search_cfg.get("location_accept", [])
-    reject = search_cfg.get("location_reject_non_remote", [])
-    return accept, reject
+    settings = load_filter_settings(search_cfg)
+    return list(settings.location_accept), list(settings.location_reject_non_remote)
 
 
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
@@ -92,27 +92,7 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
     Remote jobs are always accepted. Non-remote jobs must match an accept
     pattern and not match a reject pattern.
     """
-    if not location:
-        return True  # unknown location -- keep it, let scorer decide
-
-    loc = location.lower()
-
-    # Remote jobs always OK
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-
-    # Reject non-remote matches
-    for r in reject:
-        if r.lower() in loc:
-            return False
-
-    # Accept matches
-    for a in accept:
-        if a.lower() in loc:
-            return True
-
-    # No match -- reject unknown
-    return False
+    return location_filter_reason(location, accept, reject) is None
 
 
 # -- DB storage (JobSpy DataFrame -> SQLite) ---------------------------------
@@ -122,6 +102,11 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
+    search_cfg = config.load_search_config()
+    try:
+        profile = config.load_profile()
+    except (FileNotFoundError, OSError, ValueError):
+        profile = {}
 
     for _, row in df.iterrows():
         url = str(row.get("job_url", ""))
@@ -155,6 +140,9 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
             location_str = f"{location_str} (Remote)" if location_str else "Remote"
 
         strategy = "jobspy"
+        filter_reason = filter_job(
+            {"title": title, "location": location_str}, search_cfg, profile
+        )
 
         # If JobSpy gave us a full description, promote it directly
         full_description = None
@@ -169,10 +157,10 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
         try:
             conn.execute(
                 "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at, "
-                "full_description, application_url, detail_scraped_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "full_description, application_url, detail_scraped_at, filter_reason) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (url, title, salary, description, location_str, site_label, strategy, now,
-                 full_description, apply_url, detail_scraped_at),
+                 full_description, apply_url, detail_scraped_at, filter_reason),
             )
             new += 1
         except sqlite3.IntegrityError:
@@ -268,13 +256,13 @@ def _run_one_search(
         log.info("[%s] 0 results", label)
         return {"new": 0, "existing": 0, "errors": 0, "filtered": 0, "total": 0, "label": label}
 
-    # Filter by location before storing
+    # Count location rejects for reporting, but retain them for DB auditing.
     before = len(df)
-    df = df[df.apply(lambda row: _location_ok(
+    accepted = df.apply(lambda row: _location_ok(
         str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None,
         accept_locs, reject_locs,
-    ), axis=1)]
-    filtered = before - len(df)
+    ), axis=1)
+    filtered = int((~accepted).sum())
 
     conn = get_connection()
     new, existing = store_jobspy_results(conn, df, s["query"])

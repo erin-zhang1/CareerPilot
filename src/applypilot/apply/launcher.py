@@ -29,7 +29,8 @@ from applypilot.agent import (
     build_playwright_override_args,
     get_agent_backend,
 )
-from applypilot.database import get_connection
+from applypilot.database import get_connection, init_db
+from applypilot.filters import apply_rule_gate
 from applypilot.apply import prompt as prompt_mod
 from applypilot.apply.chrome import (
     launch_chrome, cleanup_worker, kill_all_chrome,
@@ -119,6 +120,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
                     FROM jobs
                     WHERE (url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?)
                       AND tailored_resume_path IS NOT NULL
+                      AND filter_reason IS NULL
                       AND apply_status != 'in_progress'
                     LIMIT 1
                 """, (target_url, target_url, like, like)).fetchone()
@@ -140,6 +142,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
                            fit_score, location, full_description, cover_letter_path
                     FROM jobs
                     WHERE tailored_resume_path IS NOT NULL
+                      AND filter_reason IS NULL
                       AND (apply_status IS NULL OR apply_status = 'failed')
                       AND (apply_attempts IS NULL OR apply_attempts < ?)
                       AND fit_score >= ?
@@ -853,6 +856,7 @@ def main(
     _stop_event.clear()
 
     config.ensure_dirs()
+    apply_rule_gate(init_db())
     console = Console()
 
     if continuous:
