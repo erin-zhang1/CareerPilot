@@ -6,7 +6,7 @@ litellm = pytest.importorskip("litellm")
 
 
 def _gemini_smoke_model() -> str:
-    raw = os.getenv("GEMINI_SMOKE_MODEL", "gemini-3.0-flash").strip()
+    raw = os.getenv("GEMINI_SMOKE_MODEL", "gemini-3.7-flash").strip()
     if raw.startswith("gemini/"):
         return raw
     if raw.startswith("models/"):
@@ -37,7 +37,9 @@ def test_gemini_smoke_completion_returns_non_empty_content() -> None:
         model=_gemini_smoke_model(),
         api_key=api_key,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=32,
+        # Gemini 3.7 Flash uses thinking tokens by default, so leave enough room
+        # for both its internal reasoning and the requested visible response.
+        max_tokens=256,
         timeout=60,
         num_retries=1,
     )

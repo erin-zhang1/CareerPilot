@@ -278,7 +278,7 @@ def _setup_ai_features() -> None:
         return
 
     default_model_by_source = {
-        "gemini": "gemini/gemini-3.0-flash",
+        "gemini": "gemini/gemini-3.7-flash",
         "openai": "openai/gpt-4o-mini",
         "anthropic": "anthropic/claude-3-5-haiku-latest",
         "local": "openai/local-model",

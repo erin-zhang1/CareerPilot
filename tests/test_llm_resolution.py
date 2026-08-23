@@ -13,7 +13,7 @@ def test_infers_provider_from_first_configured_source() -> None:
         }
     )
     assert cfg.provider == "gemini"
-    assert cfg.model == "gemini/gemini-3.0-flash"
+    assert cfg.model == "gemini/gemini-3.7-flash"
     assert cfg.api_key == "g-key"
 
 
@@ -29,15 +29,15 @@ def test_requires_model_provider_prefix_without_inferable_provider() -> None:
 
 
 def test_provider_and_api_key_come_from_model_contract() -> None:
-    cfg = resolve_llm_config({"LLM_MODEL": "gemini/gemini-3.0-flash", "GEMINI_API_KEY": "g-key"})
+    cfg = resolve_llm_config({"LLM_MODEL": "gemini/gemini-3.7-flash", "GEMINI_API_KEY": "g-key"})
     assert cfg.provider == "gemini"
     assert cfg.api_base is None
-    assert cfg.model == "gemini/gemini-3.0-flash"
+    assert cfg.model == "gemini/gemini-3.7-flash"
     assert cfg.api_key == "g-key"
 
 
 def test_uses_generic_api_key_for_unmapped_provider() -> None:
-    cfg = resolve_llm_config({"LLM_MODEL": "vertex_ai/gemini-3.0-flash", "LLM_API_KEY": "v-key"})
+    cfg = resolve_llm_config({"LLM_MODEL": "vertex_ai/gemini-3.7-flash", "LLM_API_KEY": "v-key"})
     assert cfg.provider == "vertex_ai"
     assert cfg.api_key == "v-key"
 

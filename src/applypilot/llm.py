@@ -3,7 +3,7 @@
 Runtime contract:
   - If set, LLM_MODEL must be a fully-qualified LiteLLM model string
     (for example: openai/gpt-4o-mini, anthropic/claude-3-5-haiku-latest,
-    gemini/gemini-3.0-flash).
+    gemini/gemini-3.7-flash).
   - If LLM_MODEL is unset, provider is inferred by first configured source:
     GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, then LLM_URL.
   - Credentials come from provider env vars or generic LLM_API_KEY.
@@ -38,7 +38,7 @@ _INFERRED_SOURCE_ORDER: tuple[tuple[str, str], ...] = (
     ("openai", "LLM_URL"),
 )
 _DEFAULT_MODEL_BY_PROVIDER = {
-    "gemini": "gemini/gemini-3.0-flash",
+    "gemini": "gemini/gemini-3.7-flash",
     "openai": "openai/gpt-5-mini",
     "anthropic": "anthropic/claude-haiku-4-5",
 }

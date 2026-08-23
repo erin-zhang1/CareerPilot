@@ -1,0 +1,40 @@
+Erin Zhang
++1 (647) 712-6722 | y3695zha@uwaterloo.ca | linkedin.com/in/erin-zhang | github.com/erin-zhang1
+Personal Website: built-by-erin.vercel.app
+
+Summary
+Expected University of Waterloo graduate with double majors in Mathematical Finance and Statistics and a Computing Minor, focused on Python backend development, REST APIs, internal tools, and correctness-critical financial data systems. Experience building DjangoFastAPI workflows, SQL-backed pipelines, and pytest-covered financial calculation systems, with a strong focus on correctness, reliability, and reproducible backend workflows.
+Education
+University of Waterloo	Expected Dec 2026
+Double Major in Mathematical Finance and Statistics, with Computing minor (Computer Science)	Waterloo, Canada
+• President's Scholarship
+• Relevant Coursework: Algorithms & Data Structures, Database Systems, Applications Software Engineering, Data-Intensive Distributed Analytics
+• Co-op Performance: Earned Excellent or Outstanding employer evaluations across all 6 co-op work terms.
+Technical Skills
+Backend: Python, FastAPI, Django, REST APIs, PostgreSQL, MySQL, SQLAlchemy, Alembic, JWT, request validation
+Data & Automation: pandas, NumPy, ETL pipelines, FTP/SFTP workflows, DBF/CSV processing
+Testing & CI/CD: pytest, unit testing, integration testing, regression testing, data validation, GitHub Actions
+Infrastructure: Git/GitHub, Linux, Docker, Prometheus, Bash
+
+Experience
+Actuarial Software Developer (Python & R)	Jan 2026 - Present (Expected Aug 2026)
+Atella Consulting	North Carolina, United States
+• Owned end-to-end development of a Python/R backend automation system powering 10 recurring actuarial reporting workflows, reducing daily calculation runtime from 5+ hours of manual Excel processing to ~3 seconds.
+• Built backend features for a Django-based internal web application and implemented RESTful API endpoints with request validation, database query optimization, and integration with downstream reporting jobs.
+• Expanded pytest unit and regression test coverage to 94% for core actuarial calculation modules, catching regressions in policy mapping, rate selection, interest accrual, and reporting outputs.
+• Designed snapshot-based reporting infrastructure with automated FTP/SFTP ingestion, DBF/CSV processing, timestamped outputs, and structured run metadata for daily and month-end traceability.
+Data Reporting Analyst (SQL & Python)	Sep 2024 - Apr 2025
+Kenna Communications	Mississauga, Canada
+• Developed automated reporting pipelines in Python and SQL that consolidated data from three sources, eliminated
+15 hours of manual work per week, and delivered recurring operational reports.
+Data Research Analyst (R & Linux)	Jan 2024 - Apr 2024
+Chinese Academy of Sciences - Lansi Institute of AI in Medicine	Remote
+• Developed automated QA pipelines for 10TB of genomic sequencing data using R and Linux, improving reproducibility and ensuring 98% downstream analysis accuracy.
+Quantitative Analyst Intern (Python)	Sep 2023 - Dec 2023
+AssetPro	Shanghai, China
+• Built a Python backtesting framework for factor-based trading signals and parallelized market-data pipelines, reducing daily processing time from 2 hours to under 15 minutes.
+Projects
+TaskFlow API: JWT-Auth Backend Service
+FastAPI, PostgreSQL, Docker, pytest, SQLAlchemy, Alembic, JWT
+• Built a RESTful task-management API with FastAPI, including user registration, JWT authentication, role-based access control, CRUD endpoints, and OpenAPI documentation.
+• Modeled data with SQLAlchemy and Alembic migrations, containerized the API/PostgreSQL stack with Docker Compose, and added GitHub Actions CI to run pytest coverage checks across auth, validation, error handling, and rollback tests.

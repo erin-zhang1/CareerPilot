@@ -21,6 +21,7 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=13.0",
     "litellm~=1.63.0",
+    "tenacity>=8.2",
     "httpx>=0.24",
     "beautifulsoup4>=4.12",
     "playwright>=1.40",
@@ -53,3 +54,8 @@ artifacts = ["src/applypilot/config/*.yaml"]
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+
+[tool.pytest.ini_options]
+markers = [
+    "smoke: live tests that call external services",
+]

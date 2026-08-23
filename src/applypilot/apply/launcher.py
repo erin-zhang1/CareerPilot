@@ -12,6 +12,7 @@ import os
 import platform
 import re
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -24,6 +25,10 @@ from rich.console import Console
 from rich.live import Live
 
 from applypilot import config
+from applypilot.agent import (
+    build_playwright_override_args,
+    get_agent_backend,
+)
 from applypilot.database import get_connection
 from applypilot.apply import prompt as prompt_mod
 from applypilot.apply.chrome import (
@@ -82,7 +87,9 @@ def _make_mcp_config(cdp_port: int) -> dict:
         }
     }
 
-
+def _make_codex_overrides(cdp_port: int) -> list[str]:
+    """Build Codex MCP overrides for Playwright."""
+    return build_playwright_override_args(cdp_port)
 # ---------------------------------------------------------------------------
 # Database operations
 # ---------------------------------------------------------------------------
@@ -228,7 +235,7 @@ def release_lock(url: str) -> None:
 # ---------------------------------------------------------------------------
 
 def gen_prompt(target_url: str, min_score: int = 7,
-               model: str = "sonnet", worker_id: int = 0) -> Path | None:
+               model: str | None = None, worker_id: int = 0) -> Path | None:
     """Generate a prompt file and print the Claude CLI command for manual debugging.
 
     Returns:
@@ -334,13 +341,94 @@ def reset_in_progress() -> int:
     conn.commit()
     return cursor.rowcount
 
+def _build_agent_command(
+    backend_name: str,
+    binary: str,
+    model: str,
+    port: int,
+    worker_id: int,
+    worker_dir: Path,
+) -> tuple[list[str], Path | None]:
+    """Build runtime command for Claude or Codex."""
+
+    if backend_name == "codex":
+        last_message_path = config.LOG_DIR / (
+            f"codex_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            f"_w{worker_id}.last-message.txt"
+        )
+
+        cmd = [
+            binary,
+            "exec",
+
+            # IMPORTANT:
+            # PR #79 omitted this, but our parser expects JSONL events.
+            "--json",
+
+            "--model",
+            model,
+
+            "--dangerously-bypass-approvals-and-sandbox",
+
+            "--cd",
+            str(worker_dir),
+
+            "--skip-git-repo-check",
+
+            "--output-last-message",
+            str(last_message_path),
+
+            *_make_codex_overrides(port),
+
+            "-",
+        ]
+
+        return cmd, last_message_path
+
+    # Claude backend — preserve existing Plus behaviour
+    mcp_config_path = config.APP_DIR / f".mcp-apply-{worker_id}.json"
+
+    cmd = [
+        binary,
+        "--model",
+        model,
+        "-p",
+        "--mcp-config",
+        str(mcp_config_path),
+        "--permission-mode",
+        "bypassPermissions",
+        "--no-session-persistence",
+        "--disallowedTools",
+        (
+            "mcp__gmail__draft_email,mcp__gmail__modify_email,"
+            "mcp__gmail__delete_email,mcp__gmail__download_attachment,"
+            "mcp__gmail__batch_modify_emails,mcp__gmail__batch_delete_emails,"
+            "mcp__gmail__create_label,mcp__gmail__update_label,"
+            "mcp__gmail__delete_label,mcp__gmail__get_or_create_label,"
+            "mcp__gmail__list_email_labels,mcp__gmail__create_filter,"
+            "mcp__gmail__list_filters,mcp__gmail__get_filter,"
+            "mcp__gmail__delete_filter"
+        ),
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-",
+    ]
+
+    return cmd, None
 
 # ---------------------------------------------------------------------------
 # Per-job execution
 # ---------------------------------------------------------------------------
 
-def run_job(job: dict, port: int, worker_id: int = 0,
-            model: str = "sonnet", dry_run: bool = False) -> tuple[str, int]:
+def run_job(
+    job: dict,
+    port: int,
+    worker_id: int = 0,
+    model: str | None = None,
+    dry_run: bool = False,
+    agent: str | None = None,
+) -> tuple[str, int]:
     """Spawn a Claude Code session for one job application.
 
     Returns:
@@ -363,30 +451,15 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     )
 
     # Write per-worker MCP config
-    mcp_config_path = config.APP_DIR / f".mcp-apply-{worker_id}.json"
-    mcp_config_path.write_text(json.dumps(_make_mcp_config(port)), encoding="utf-8")
+    backend = get_agent_backend(agent, model=model)
 
-    # Build claude command
-    cmd = [
-        "claude",
-        "--model", model,
-        "-p",
-        "--mcp-config", str(mcp_config_path),
-        "--permission-mode", "bypassPermissions",
-        "--no-session-persistence",
-        "--disallowedTools", (
-            "mcp__gmail__draft_email,mcp__gmail__modify_email,"
-            "mcp__gmail__delete_email,mcp__gmail__download_attachment,"
-            "mcp__gmail__batch_modify_emails,mcp__gmail__batch_delete_emails,"
-            "mcp__gmail__create_label,mcp__gmail__update_label,"
-            "mcp__gmail__delete_label,mcp__gmail__get_or_create_label,"
-            "mcp__gmail__list_email_labels,mcp__gmail__create_filter,"
-            "mcp__gmail__list_filters,mcp__gmail__get_filter,"
-            "mcp__gmail__delete_filter"
-        ),
-        "--output-format", "stream-json",
-        "--verbose", "-",
-    ]
+    mcp_config_path = config.APP_DIR / f".mcp-apply-{worker_id}.json"
+
+    if backend.name == "claude":
+        mcp_config_path.write_text(
+            json.dumps(_make_mcp_config(port)),
+            encoding="utf-8",
+        )
 
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
@@ -394,10 +467,20 @@ def run_job(job: dict, port: int, worker_id: int = 0,
 
     profile = config.load_profile()
     pwd = profile.get("personal", {}).get("password", "")
+
     if pwd:
         env["APPLYPILOT_SITE_PASSWORD"] = pwd
 
     worker_dir = reset_worker_dir(worker_id)
+
+    cmd, last_message_path = _build_agent_command(
+        backend.name,
+        backend.binary,
+        backend.model,
+        port,
+        worker_id,
+        worker_dir,
+    )
 
     update_state(worker_id, status="applying", job_title=job["title"],
                  company=job.get("site", ""), score=job.get("fit_score", 0),
@@ -447,7 +530,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                 try:
                     msg = json.loads(line)
                     msg_type = msg.get("type")
-                    if msg_type == "assistant":
+                    if backend.name == "claude" and msg_type == "assistant":
                         for block in msg.get("message", {}).get("content", []):
                             bt = block.get("type")
                             if bt == "text":
@@ -477,6 +560,26 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                                 update_state(worker_id,
                                              actions=cur_actions + 1,
                                              last_action=desc[:35])
+                    elif backend.name == "codex" and msg_type == "item.completed":
+                        item = msg.get("item", {})
+
+                        if item.get("type") == "agent_message":
+                            text = item.get("text", "")
+
+                            if text:
+                                text_parts.append(text)
+                                lf.write(text + "\n")
+
+                    elif backend.name == "codex" and msg_type == "turn.completed":
+                        usage = msg.get("usage", {}) or {}
+
+                        stats = {
+                            "input_tokens": usage.get("input_tokens", 0),
+                            "output_tokens": usage.get("output_tokens", 0),
+                            "cache_read": usage.get("cached_input_tokens", 0),
+                            # ChatGPT subscription auth doesn't expose an API dollar cost here.
+                            "cost_usd": 0,
+                        }
                     elif msg_type == "result":
                         stats = {
                             "input_tokens": msg.get("usage", {}).get("input_tokens", 0),
@@ -499,11 +602,19 @@ def run_job(job: dict, port: int, worker_id: int = 0,
             return "skipped", int((time.time() - start) * 1000)
 
         output = "\n".join(text_parts)
+        if not output and last_message_path and last_message_path.exists():
+            output = last_message_path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
         elapsed = int(time.time() - start)
         duration_ms = int((time.time() - start) * 1000)
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        job_log = config.LOG_DIR / f"claude_{ts}_w{worker_id}_{job.get('site', 'unknown')[:20]}.txt"
+        job_log = config.LOG_DIR / (
+            f"{backend.name}_{ts}_w{worker_id}_"
+            f"{job.get('site', 'unknown')[:20]}.txt"
+        )
         job_log.write_text(output, encoding="utf-8")
 
         if stats:
@@ -595,10 +706,16 @@ def _is_permanent_failure(result: str) -> bool:
 # Worker loop
 # ---------------------------------------------------------------------------
 
-def worker_loop(worker_id: int = 0, limit: int = 1,
-                target_url: str | None = None,
-                min_score: int = 7, headless: bool = False,
-                model: str = "sonnet", dry_run: bool = False) -> tuple[int, int]:
+def worker_loop(
+    worker_id: int = 0,
+    limit: int = 1,
+    target_url: str | None = None,
+    min_score: int = 7,
+    headless: bool = False,
+    model: str | None = None,
+    dry_run: bool = False,
+    agent: str | None = None,
+) -> tuple[int, int]:
     """Run jobs sequentially until limit is reached or queue is empty.
 
     Args:
@@ -651,8 +768,14 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
             add_event(f"[W{worker_id}] Launching Chrome...")
             chrome_proc = launch_chrome(worker_id, port=port, headless=headless)
 
-            result, duration_ms = run_job(job, port=port, worker_id=worker_id,
-                                            model=model, dry_run=dry_run)
+            result, duration_ms = run_job(
+                job,
+                port=port,
+                worker_id=worker_id,
+                model=model,
+                dry_run=dry_run,
+                agent=agent,
+            )
 
             if result == "skipped":
                 release_lock(job["url"])
@@ -700,10 +823,18 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
 # Main entry point (called from cli.py)
 # ---------------------------------------------------------------------------
 
-def main(limit: int = 1, target_url: str | None = None,
-         min_score: int = 7, headless: bool = False, model: str = "sonnet",
-         dry_run: bool = False, continuous: bool = False,
-         poll_interval: int = 60, workers: int = 1) -> None:
+def main(
+    limit: int = 1,
+    target_url: str | None = None,
+    min_score: int = 7,
+    headless: bool = False,
+    model: str | None = None,
+    dry_run: bool = False,
+    continuous: bool = False,
+    poll_interval: int = 60,
+    workers: int = 1,
+    agent: str | None = None,
+) -> None:
     """Launch the apply pipeline.
 
     Args:
@@ -781,6 +912,7 @@ def main(limit: int = 1, target_url: str | None = None,
                 # Single worker — run directly in main thread
                 total_applied, total_failed = worker_loop(
                     worker_id=0,
+                    agent = agent,
                     limit=effective_limit,
                     target_url=target_url,
                     min_score=min_score,
@@ -810,6 +942,7 @@ def main(limit: int = 1, target_url: str | None = None,
                             headless=headless,
                             model=model,
                             dry_run=dry_run,
+                            agent=agent,
                         ): i
                         for i in range(workers)
                     }

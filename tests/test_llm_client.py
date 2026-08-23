@@ -64,7 +64,7 @@ def test_chat_supports_temperature_and_typed_extra(monkeypatch) -> None:
         LLMConfig(
             provider="gemini",
             api_base=None,
-            model="gemini/gemini-3.0-flash",
+            model="gemini/gemini-3.7-flash",
             api_key="g-key",
         )
     )
@@ -85,7 +85,7 @@ def test_chat_supports_temperature_and_typed_extra(monkeypatch) -> None:
     )
 
     assert response == "ok"
-    assert captured["model"] == "gemini/gemini-3.0-flash"
+    assert captured["model"] == "gemini/gemini-3.7-flash"
     assert captured["api_key"] == "g-key"
     assert captured["temperature"] == 0.2
     assert captured["top_p"] == 0.9

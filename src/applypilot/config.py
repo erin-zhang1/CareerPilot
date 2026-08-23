@@ -222,6 +222,57 @@ TIER_COMMANDS: dict[int, list[str]] = {
     3: ["apply"],
 }
 
+AGENT_BACKENDS = ("claude", "codex")
+
+
+def get_agent_backend() -> str:
+    """Return the configured auto-apply agent backend.
+
+    Priority:
+    1. APPLYPILOT_AGENT environment variable
+    2. Claude CLI if installed
+    3. Codex CLI if installed
+    4. Claude as legacy fallback
+    """
+    load_env()
+
+    configured = (os.environ.get("APPLYPILOT_AGENT") or "").strip().lower()
+
+    if configured in AGENT_BACKENDS:
+        return configured
+
+    if shutil.which("claude"):
+        return "claude"
+
+    if shutil.which("codex"):
+        return "codex"
+
+    return "claude"
+
+
+def codex_login_status() -> tuple[bool, str]:
+    """Check whether Codex CLI is installed and logged in."""
+    import subprocess
+
+    codex_bin = shutil.which("codex")
+
+    if not codex_bin:
+        return False, "Codex CLI not found"
+
+    try:
+        proc = subprocess.run(
+            [codex_bin, "login", "status"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        return False, str(exc)
+
+    output = (proc.stdout or proc.stderr or "").strip()
+    ok = proc.returncode == 0
+
+    return ok, output or f"exit code {proc.returncode}"
 
 def get_tier() -> int:
     """Detect the current tier based on available dependencies.
@@ -243,14 +294,22 @@ def get_tier() -> int:
     if not has_llm:
         return 1
 
-    has_claude = shutil.which("claude") is not None
+    backend = get_agent_backend()
+
+    if backend == "codex":
+        has_codex = shutil.which("codex") is not None
+        logged_in, _ = codex_login_status()
+        has_agent = has_codex and logged_in
+    else:
+        has_agent = shutil.which("claude") is not None
+
     try:
         get_chrome_path()
         has_chrome = True
     except FileNotFoundError:
         has_chrome = False
 
-    if has_claude and has_chrome:
+    if has_agent and has_chrome:
         return 3
 
     return 2
@@ -285,8 +344,24 @@ def check_tier(required: int, feature: str) -> None:
             "(or set LLM_MODEL with LLM_API_KEY)"
         )
     if required >= 3:
-        if not shutil.which("claude"):
-            missing.append("Claude Code CLI — install from [bold]https://claude.ai/code[/bold]")
+        backend = get_agent_backend()
+
+        if backend == "codex":
+            if not shutil.which("codex"):
+                missing.append(
+                    "Codex CLI — install with [bold]npm install -g @openai/codex[/bold]"
+                )
+            else:
+                logged_in, detail = codex_login_status()
+                if not logged_in:
+                    missing.append(
+                        f"Codex login — run [bold]codex login[/bold] ({detail})"
+                    )
+        else:
+            if not shutil.which("claude"):
+                missing.append(
+                    "Claude Code CLI — install from [bold]https://claude.ai/code[/bold]"
+                )
         try:
             get_chrome_path()
         except FileNotFoundError:

@@ -105,7 +105,7 @@ Each stage is independent. Run them all or pick what you need.
 |-----------|-------------|---------|
 | Python 3.11+ | Everything | Core runtime |
 | Node.js 18+ | Auto-apply | Needed for `npx` to run Playwright MCP server |
-| LLM credentials or local endpoint | Scoring, tailoring, cover letters | Set one of `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `LLM_URL`. Optional: set `LLM_MODEL` (for example `gemini/gemini-3.0-flash`) to override the default model. |
+| LLM credentials or local endpoint | Scoring, tailoring, cover letters | Set one of `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `LLM_URL`. Optional: set `LLM_MODEL` (for example `gemini/gemini-3.7-flash`) to override the default model. |
 | Chrome/Chromium | Auto-apply | Auto-detected on most systems |
 | Claude Code CLI | Auto-apply | Install from [claude.ai/code](https://claude.ai/code) |
 

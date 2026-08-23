@@ -336,7 +336,18 @@ def apply(
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Max applications to submit."),
     workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel browser workers."),
     min_score: int = typer.Option(7, "--min-score", help="Minimum fit score for job selection."),
-    model: str = typer.Option("haiku", "--model", "-m", help="Claude model name."),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Agent model name. Default depends on backend.",
+    ),
+
+    agent: str = typer.Option(
+        "auto",
+        "--agent",
+        help="Auto-apply backend: auto, claude, or codex.",
+    ),
     continuous: bool = typer.Option(False, "--continuous", "-c", help="Run forever, polling for new jobs."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without submitting."),
     headless: bool = typer.Option(False, "--headless", help="Run browsers in headless mode."),
@@ -396,7 +407,23 @@ def apply(
         return
 
     # --- Full apply mode ---
+    from applypilot.agent import get_agent_backend, codex_login_ok
 
+    if agent not in ("auto", "claude", "codex"):
+        console.print(
+            f"[red]Invalid --agent:[/red] {agent}. "
+            "Choose auto, claude, or codex."
+        )
+        raise typer.Exit(code=1)
+
+    backend = get_agent_backend(
+        agent if agent != "auto" else None,
+        model=model,
+    )
+
+    # config.get_tier/check_tier reads this.
+    os.environ["APPLYPILOT_AGENT"] = backend.name
+    
     # Check 1: Tier 3 required (Claude Code CLI + Chrome)
     check_tier(3, "auto-apply")
 
@@ -448,7 +475,8 @@ def apply(
     console.print("\n[bold blue]Launching Auto-Apply[/bold blue]")
     console.print(f"  Limit:    {'unlimited' if continuous else effective_limit}")
     console.print(f"  Workers:  {workers}")
-    console.print(f"  Model:    {model}")
+    console.print(f"  Backend:  {backend.name}")
+    console.print(f"  Model:    {backend.model}")
     console.print(f"  Headless: {headless}")
     console.print(f"  Dry run:  {dry_run}")
     if url:
@@ -460,10 +488,11 @@ def apply(
         target_url=url,
         min_score=min_score,
         headless=headless,
-        model=model,
+        model=backend.model,
         dry_run=dry_run,
         continuous=continuous,
         workers=workers,
+        agent=backend.name,
     )
 
 
@@ -623,12 +652,52 @@ def doctor() -> None:
 
     # --- Tier 3 checks ---
     # Claude Code CLI
-    claude_bin = shutil.which("claude")
-    if claude_bin:
-        results.append(("Claude Code CLI", ok_mark, claude_bin))
+    # Auto-apply agent
+    from applypilot.config import get_agent_backend, codex_login_status
+
+    agent_backend = get_agent_backend()
+
+    results.append(
+        ("Auto-apply agent", ok_mark, agent_backend)
+    )
+
+    if agent_backend == "codex":
+        codex_bin = shutil.which("codex")
+
+        if not codex_bin:
+            results.append(
+                (
+                    "Codex CLI",
+                    fail_mark,
+                    "Install with: npm install -g @openai/codex",
+                )
+            )
+        else:
+            results.append(("Codex CLI", ok_mark, codex_bin))
+
+            logged_in, detail = codex_login_status()
+
+            results.append(
+                (
+                    "Codex login",
+                    ok_mark if logged_in else fail_mark,
+                    detail,
+                )
+            )
+
     else:
-        results.append(("Claude Code CLI", fail_mark,
-                        "Install from https://claude.ai/code (needed for auto-apply)"))
+        claude_bin = shutil.which("claude")
+
+        if claude_bin:
+            results.append(("Claude Code CLI", ok_mark, claude_bin))
+        else:
+            results.append(
+                (
+                    "Claude Code CLI",
+                    fail_mark,
+                    "Install from https://claude.ai/code",
+                )
+            )
 
     # Chrome
     try:
@@ -672,9 +741,9 @@ def doctor() -> None:
 
     if tier == 1:
         console.print("[dim]  -> Tier 2 unlocks: scoring, tailoring, cover letters (needs LLM API key)[/dim]")
-        console.print("[dim]  -> Tier 3 unlocks: auto-apply (needs Claude Code CLI + Chrome + Node.js)[/dim]")
+        console.print("[dim]  -> Tier 3 unlocks: auto-apply (needs Codex or Claude Code + Chrome + Node.js)")
     elif tier == 2:
-        console.print("[dim]  -> Tier 3 unlocks: auto-apply (needs Claude Code CLI + Chrome + Node.js)[/dim]")
+        console.print("[dim]  -> Tier 3 unlocks: auto-apply (needs Codex or Claude Code + Chrome + Node.js)")
 
     console.print()
 
